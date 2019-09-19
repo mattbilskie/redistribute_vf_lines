@@ -264,6 +264,25 @@ def splitremainder(origline, rdline, remainder, mesh):
     return rd, remainder, maxnotreached
 
 #----------------------------------------------------------
+# F U N C T I O N   L I N E I N M E S H
+#----------------------------------------------------------
+#
+# Function to check if the entire line segment is in the mesh.
+# result = function(line, mesh)
+#----------------------------------------------------------
+def lineinmesh(line, mesh):
+
+    coords = list(line.coords)
+
+    for p in range(len(coords)):
+        try:
+            z = interpval(mesh, coords[p][0], coords[p][1])
+        except:
+            return False
+
+    return True
+
+#----------------------------------------------------------
 # M A I N
 #----------------------------------------------------------
 #
@@ -289,13 +308,20 @@ def main():
     shapes = sf.shapes()
     numShapes = len(shapes) # Number of shapes
 
+    outsf = raw_input('Name of redistributed output shapefile (w/out ext.): ')
+
     # Create shapefile for writing    
-    w = shapefile.Writer('test_out', shapeType = 3)
+    w = shapefile.Writer(outsf, shapeType = 3)
     w.field('name', 'C')
 
     for i in range(numShapes):
         s = sf.shape(i) # Read shape i
         line = LineString(s.points) #s.points returns a list of tuples containing (x,y) coordinates of each point in the shape
+
+        # Make sure all points in line are within the meshing domain
+        isinmesh = lineinmesh(line, mesh)
+        if isinmesh == False:
+            continue
 
         # Re-distribute verticies according to the size function
         rd = redistribute(line, mesh)
