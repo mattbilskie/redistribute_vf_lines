@@ -96,6 +96,8 @@ def redistribute(line, mesh):
     numNewPts = 0   # Number of verticies on the redistributed line
     lastp = 0       # Index of the last vertex on the original line used to add a point to the rd line
 
+    rd = None
+
     for p in range(len(coords)):
 
         # Get the size function value at the first p index to start
@@ -120,7 +122,7 @@ def redistribute(line, mesh):
                 lastp = p
         
         # Add the last vertex
-        if p == len(coords)-1:
+        if (p == len(coords)-1) and (rd is not None):
             tcoords = list(rd.coords)
             rd = LineString(tcoords[:] + [coords[p]])
             numNewPts = numNewPts + 1
@@ -168,9 +170,13 @@ def checkredist(origline, rdline, mesh):
         iters = iters + 1
 
     # Cut our losses and trim off the remainder / last line segment
-    rdcoords = list(rdline.coords)
-    numrdpots = len(rdcoords)
-    rdline = LineString(rdcoords[:numrdpts-1])
+    if (rdline is not None):
+        rdcoords = list(rdline.coords)
+        numrdpots = len(rdcoords)
+        rdline = LineString(rdcoords[:numrdpts-1])
+        return rdline
+    else:
+        return None
         
     '''
     # Add remainder to the last line segment
@@ -178,7 +184,6 @@ def checkredist(origline, rdline, mesh):
     numrdpts = len(rdcoords)
     rdline = LineString(rdcoords[:numrdpts-2] + [rdcoords[numrdpts-1]])
     '''
-    return rdline
 
 #----------------------------------------------------------
 # F U N C T I O N   S P L I T R E M A I N D E R
@@ -191,6 +196,7 @@ def checkredist(origline, rdline, mesh):
 def splitremainder(origline, rdline, remainder, mesh):
 
     maxnotreached = True
+    rd = None
 
     # Create a list of coordinates along the lines
     origcoords = list(origline.coords)
@@ -250,16 +256,17 @@ def splitremainder(origline, rdline, remainder, mesh):
                 lsegment = lsegment + 1
 
     # Add the last vertex
-    tcoords = list(rd.coords)
-    rd = LineString(tcoords[:] + [origcoords[p]])
-    numNewPts = numNewPts + 1
-    lastp = p
-    lsegment = lsegment + 1
+    if (rd is not None):
+        tcoords = list(rd.coords)
+        rd = LineString(tcoords[:] + [origcoords[p]])
+        numNewPts = numNewPts + 1
+        lastp = p
+        lsegment = lsegment + 1
 
-    # Final update of the coordinates of the redistributed line
-    tcoords = list(rd.coords)
-    # Update the remainder for the new redistributed line
-    remainder = Point(tcoords[numNewPts-1]).distance(Point(tcoords[numNewPts]))
+        # Final update of the coordinates of the redistributed line
+        tcoords = list(rd.coords)
+        # Update the remainder for the new redistributed line
+        remainder = Point(tcoords[numNewPts-1]).distance(Point(tcoords[numNewPts]))
 
     return rd, remainder, maxnotreached
 
@@ -291,10 +298,12 @@ def main():
 
     # Initialize Variables
     remthreshold = 0.10
+    rd = None
     
     # Load mesh
     inmesh = raw_input('Name of ADCIRC mesh: ')
     #inmesh = 'fort.14'
+    print('Reading in mesh file and computing size function...')
     mesh = PyAdcirc.Mesh(inmesh)
     ierr = mesh.read()
     if ierr == 0:
@@ -304,21 +313,28 @@ def main():
     # Load shapefile
     insf = raw_input('Name of shapefile (w/out ext.): ')
     #insf = 'line2'
+    print('Reading in initial shapefile data...')
     sf = shapefile.Reader(insf)
     shapes = sf.shapes()
     numShapes = len(shapes) # Number of shapes
 
     outsf = raw_input('Name of redistributed output shapefile (w/out ext.): ')
 
-    # Create shapefile for writing    
+    # Create shapefile for writing
+    print('Creating output shapefile for writing...')
     w = shapefile.Writer(outsf, shapeType = 3)
     w.field('name', 'C')
 
     for i in range(numShapes):
+        
+        print('Working on line ',i,' out of ',numShapes)
+
         s = sf.shape(i) # Read shape i
         line = LineString(s.points) #s.points returns a list of tuples containing (x,y) coordinates of each point in the shape
 
         # Make sure all points in line are within the meshing domain
+        # This should be fixed to see if only a small portion of the lines are out to
+        # just remove the line segments that are outside the domain.
         isinmesh = lineinmesh(line, mesh)
         if isinmesh == False:
             continue
@@ -327,12 +343,14 @@ def main():
         rd = redistribute(line, mesh)
 
         # Now I need a check to examine the last line segment distance
-        rd = checkredist(line, rd, mesh)
-        
-        # Write the redistributed line to the shapefile
-        rd = [rd.coords[:]]
-        w.line(rd)
-        w.record('linestring1')
+        if (rd is not None):
+            rd = checkredist(line, rd, mesh)
+       
+            if (rd is not None):
+                # Write the redistributed line to the shapefile
+                rd = [rd.coords[:]]
+                w.line(rd)
+                w.record('linestring1')
 
     # Close shapefile 
     w.close()
