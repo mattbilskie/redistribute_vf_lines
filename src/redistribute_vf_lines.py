@@ -67,19 +67,22 @@ def redist_verticies(geom, distance):
 # F U N C T I O N   I N T E R P V A L       
 #----------------------------------------------------------
 #
-# Function to redistribute points based on the local mesh
-# size function.
-# result = function(line, mesh)
+# Function to obtain z-value from a mesh for a given coordinate pair.
+# result = function(mesh,x,y)
 #----------------------------------------------------------
 def interpval(mesh, x, y):
     # Find element point p is in
     elem = mesh.findElement(x,y)
     # Calculate the value at point p based on the barycentric weights
-    weight = mesh.element(elem).interpolationWeights(x,y)
-    z1 = weight[0] * mesh.size[mesh.element(elem).node(0).id()]
-    z2 = weight[1] * mesh.size[mesh.element(elem).node(1).id()]
-    z3 = weight[2] * mesh.size[mesh.element(elem).node(2).id()]
-    return z1 + z2 + z3
+    try:
+        weight = mesh.element(elem).interpolationWeights(x,y)
+        z1 = weight[0] * mesh.size[mesh.element(elem).node(0).id()]
+        z2 = weight[1] * mesh.size[mesh.element(elem).node(1).id()]
+        z3 = weight[2] * mesh.size[mesh.element(elem).node(2).id()]
+        return z1 + z2 + z3
+    except:
+        nnode = mesh.findNearestNode(x,y)
+        return mesh.node(nnode).z()
 
 #----------------------------------------------------------
 # F U N C T I O N   R E D I S T R I B U T E
@@ -108,7 +111,7 @@ def redistribute(line, mesh):
         distchk = Point(coords[lastp]).distance(Point(coords[p]))
 
         # Check the distance exceeds the desired size function, zlength
-        if distchk > zlength:
+        if distchk >= zlength:
             if numNewPts < 1:
                 # Add the first line segment to the redistributed line
                 rd = LineString([coords[lastp], coords[p]])
@@ -163,27 +166,28 @@ def checkredist(origline, rdline, mesh):
     maxIter = 5  
     iters = 0
     maxnotreached = True
-    while (maxnotreached) and (remainder > lthres):
-        if iters >= maxIter:
-            break
+    while (maxnotreached) and (remainder > lthres) and (iters < maxIter):
+    #while (maxnotreached) and (remainder > lthres):
         rdline, remainder, maxnotreached = splitremainder(origline, rdline, remainder, mesh)
         iters = iters + 1
 
-    # Cut our losses and trim off the remainder / last line segment
-    if (rdline is not None):
+    ratio = min(remainder,sizefunc) / max(remainder,sizefunc)
+    if (ratio < 0.2):
+        # Add remainder to the last line segment
         rdcoords = list(rdline.coords)
-        numrdpots = len(rdcoords)
-        rdline = LineString(rdcoords[:numrdpts-1])
+        numrdpts = len(rdcoords)
+        rdline = LineString(rdcoords[:numrdpts-2] + [rdcoords[numrdpts-1]])
         return rdline
+    #elif (ratio > 0.80):
     else:
-        return None
-        
-    '''
-    # Add remainder to the last line segment
-    rdcoords = list(rdline.coords)
-    numrdpts = len(rdcoords)
-    rdline = LineString(rdcoords[:numrdpts-2] + [rdcoords[numrdpts-1]])
-    '''
+        # Cut our losses and trim off the remainder / last line segment
+        if (rdline is not None):
+            rdcoords = list(rdline.coords)
+            numrdpts = len(rdcoords)
+            rdline = LineString(rdcoords[:numrdpts-1])
+            return rdline
+        else:
+            return None
 
 #----------------------------------------------------------
 # F U N C T I O N   S P L I T R E M A I N D E R
@@ -298,11 +302,11 @@ def main():
 
     # Initialize Variables
     remthreshold = 0.10
-    rd = None
+    rdl = None
     
     # Load mesh
-    inmesh = raw_input('Name of ADCIRC mesh: ')
-    #inmesh = 'fort.14'
+    #inmesh = raw_input('Name of ADCIRC mesh: ')
+    inmesh = 'NGOM_SizeFunction_utm16.grd'
     print('Reading in mesh file and computing size function...')
     mesh = PyAdcirc.Mesh(inmesh)
     ierr = mesh.read()
@@ -311,14 +315,15 @@ def main():
     mesh.size = mesh.computeMeshSize()
 
     # Load shapefile
-    insf = raw_input('Name of shapefile (w/out ext.): ')
-    #insf = 'line2'
+    #insf = raw_input('Name of shapefile (w/out ext.): ')
+    insf = 'PascBig5m_Combined_Ridge_forRedist'
     print('Reading in initial shapefile data...')
     sf = shapefile.Reader(insf)
     shapes = sf.shapes()
     numShapes = len(shapes) # Number of shapes
 
-    outsf = raw_input('Name of redistributed output shapefile (w/out ext.): ')
+    #outsf = raw_input('Name of redistributed output shapefile (w/out ext.): ')
+    outsf = 'PascBig5m_Combined_Ridge_forRedist_Redistributed'
 
     # Create shapefile for writing
     print('Creating output shapefile for writing...')
@@ -335,21 +340,24 @@ def main():
         # Make sure all points in line are within the meshing domain
         # This should be fixed to see if only a small portion of the lines are out to
         # just remove the line segments that are outside the domain.
-        isinmesh = lineinmesh(line, mesh)
-        if isinmesh == False:
-            continue
+        #isinmesh = lineinmesh(line, mesh)
+        #if isinmesh == False:
+        #    continue
+        
+        # Redistribute all lines to 1 m spacing
+        rdl = redist_verticies(line, 1.0)
 
         # Re-distribute verticies according to the size function
-        rd = redistribute(line, mesh)
+        rdl = redistribute(rdl, mesh)
 
         # Now I need a check to examine the last line segment distance
-        if (rd is not None):
-            rd = checkredist(line, rd, mesh)
+        if (rdl is not None):
+            rdl = checkredist(line, rdl, mesh)
        
-            if (rd is not None):
+            if (rdl is not None):
                 # Write the redistributed line to the shapefile
-                rd = [rd.coords[:]]
-                w.line(rd)
+                rdl = [rdl.coords[:]]
+                w.line(rdl)
                 w.record('linestring1')
 
     # Close shapefile 
